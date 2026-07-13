@@ -1,0 +1,229 @@
+@import "tailwindcss";
+
+/* Load Custom Fonts from public/fonts/ */
+@font-face {
+  font-family: 'Minion Pro';
+  src: url('/fonts/Minion Pro.ttf') format('truetype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Commissioner';
+  src: url('/fonts/Commissioner.ttf') format('truetype');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Global Variables */
+:root {
+  --color-cosmos-black: #161616;
+  --color-clear-white: #FFFFFF;
+  --color-gray-dark: #323232;
+  --color-gray-medium-dark: #464646;
+  --color-gray-medium: #999999;
+  --color-gray-light: #CECECE;
+  --color-gray-very-light: #F4F4F4;
+
+  font-family: 'Commissioner', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  /* Theme defaults */
+  color: var(--color-cosmos-black);
+  background-color: var(--color-clear-white);
+
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Theme Switch Support */
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* App Theme Styles */
+body.theme-light {
+  background-color: var(--color-clear-white);
+  color: var(--color-cosmos-black);
+}
+
+body.theme-dark {
+  background-color: var(--color-cosmos-black);
+  color: var(--color-clear-white);
+}
+
+/* Typography Hierarchy based on Design Manual */
+h1, h2, h3, h4, .serif-heading {
+  font-family: 'Minion Pro', 'Georgia', serif;
+  font-weight: 500;
+  text-align: left;
+  letter-spacing: -0.02em;
+}
+
+/* Typography elements */
+.typography-title {
+  font-size: 2.25rem; /* 36px */
+  line-height: 1.1;
+  margin-bottom: 1.5rem;
+}
+
+.typography-subtitle {
+  font-size: 1.5rem; /* 24px */
+  line-height: 1.2;
+  margin-bottom: 1rem;
+}
+
+.typography-body {
+  font-size: 0.95rem; /* ~15px */
+  line-height: 1.6;
+  font-family: 'Commissioner', sans-serif;
+}
+
+.typography-caption {
+  font-size: 0.8rem; /* ~13px */
+  line-height: 1.5;
+  font-family: 'Commissioner', sans-serif;
+  color: var(--color-gray-medium);
+}
+
+/* Scrollbar Customization */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-gray-light);
+  border-radius: 3px;
+}
+.theme-dark ::-webkit-scrollbar-thumb {
+  background: var(--color-gray-dark);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-gray-medium);
+}
+
+/* Range input/slider styling */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  background: var(--color-gray-light);
+  height: 3px;
+  border-radius: 2px;
+}
+.theme-dark input[type="range"]::-webkit-slider-runnable-track {
+  background: var(--color-gray-dark);
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--color-cosmos-black);
+  height: 12px;
+  width: 12px;
+  border-radius: 50%;
+  margin-top: -4.5px;
+  transition: transform 0.1s ease;
+}
+.theme-dark input[type="range"]::-webkit-slider-thumb {
+  background: var(--color-clear-white);
+}
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Custom interactive classes */
+.brand-btn {
+  font-family: 'Commissioner', sans-serif;
+  font-weight: 500;
+  font-size: 0.875rem;
+  padding: 0.625rem 1.25rem;
+  border: 1px solid var(--color-cosmos-black);
+  background-color: var(--color-cosmos-black);
+  color: var(--color-clear-white);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.theme-dark .brand-btn {
+  border-color: var(--color-clear-white);
+  background-color: var(--color-clear-white);
+  color: var(--color-cosmos-black);
+}
+
+.brand-btn:hover {
+  background-color: transparent;
+  color: var(--color-cosmos-black);
+}
+
+.theme-dark .brand-btn:hover {
+  background-color: transparent;
+  color: var(--color-clear-white);
+}
+
+.brand-btn-secondary {
+  font-family: 'Commissioner', sans-serif;
+  font-weight: 500;
+  font-size: 0.875rem;
+  padding: 0.625rem 1.25rem;
+  border: 1px solid var(--color-gray-light);
+  background-color: transparent;
+  color: var(--color-cosmos-black);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.theme-dark .brand-btn-secondary {
+  border-color: var(--color-gray-dark);
+  color: var(--color-clear-white);
+}
+
+.brand-btn-secondary:hover {
+  border-color: var(--color-cosmos-black);
+  background-color: var(--color-gray-very-light);
+}
+
+.theme-dark .brand-btn-secondary:hover {
+  border-color: var(--color-clear-white);
+  background-color: var(--color-gray-dark);
+}
+
+/* Grid overlay background to represent order in design manual */
+.brand-grid-bg {
+  background-size: 40px 40px;
+  background-image: linear-gradient(to right, rgba(0, 0, 0, 0.03) 1px, transparent 1px),
+                    linear-gradient(to bottom, rgba(0, 0, 0, 0.03) 1px, transparent 1px);
+}
+.theme-dark .brand-grid-bg {
+  background-image: linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+}
