@@ -1,7 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import PendulumCanvas from './components/PendulumCanvas';
 import AnimatedView from './components/AnimatedView';
+import QueryBuilderModal from './components/QueryBuilderModal';
 import { Slider, ColorPicker, Toggle, Select, Checkbox } from './components/Controls';
+import JSZip from 'jszip';
+import pkg from '../package.json';
+import { buildStaticPreset, downloadPresetJson, readPresetFile } from './lib/presetFormat';
+import { staticSettingsToApiParams } from './lib/apiQuery';
 import './index.css';
 
 // Hex to RGBA helper for canvas thumbnails
@@ -23,6 +28,41 @@ const isBgDark = (hex) => {
   return hex === '#161616' || hex === '#323232' || hex === '#464646';
 };
 
+function clampInt(n, min, max) {
+  return Math.min(max, Math.max(min, Math.round(n)));
+}
+
+function hslToHex(h, s, l) {
+  // h: 0..360, s/l: 0..100
+  const sat = s / 100;
+  const light = l / 100;
+  const c = (1 - Math.abs(2 * light - 1)) * sat;
+  const hh = ((h % 360) + 360) % 360;
+  const x = c * (1 - Math.abs(((hh / 60) % 2) - 1));
+  const m = light - c / 2;
+
+  let r1 = 0, g1 = 0, b1 = 0;
+  if (hh < 60) [r1, g1, b1] = [c, x, 0];
+  else if (hh < 120) [r1, g1, b1] = [x, c, 0];
+  else if (hh < 180) [r1, g1, b1] = [0, c, x];
+  else if (hh < 240) [r1, g1, b1] = [0, x, c];
+  else if (hh < 300) [r1, g1, b1] = [x, 0, c];
+  else [r1, g1, b1] = [c, 0, x];
+
+  const r = clampInt((r1 + m) * 255, 0, 255);
+  const g = clampInt((g1 + m) * 255, 0, 255);
+  const b = clampInt((b1 + m) * 255, 0, 255);
+  return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+}
+
+function randomColorfulBackgroundHex() {
+  // “Normally colourful” (avoid near-white/near-black extremes)
+  const hue = Math.floor(Math.random() * 360);
+  const sat = Math.floor(55 + Math.random() * 35);   // 55..90
+  const light = Math.floor(28 + Math.random() * 52); // 28..80
+  return hslToHex(hue, sat, light);
+}
+
 // Miniature canvas thumbnail for sequence gallery
 const PendulumThumbnail = ({ config, onClick }) => {
   const canvasRef = useRef(null);
@@ -36,6 +76,8 @@ const PendulumThumbnail = ({ config, onClick }) => {
     
     canvas.width = width * 2;
     canvas.height = height * 2;
+    // Reset transform so scaling doesn't compound on re-render.
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.scale(2, 2);
     
     ctx.fillStyle = config.backgroundColor;
@@ -151,6 +193,12 @@ function App() {
 
   // --- RANDOMIZER & CONFIG MODAL STATE ---
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
+  const [isQueryBuilderOpen, setIsQueryBuilderOpen] = useState(false);
+  const [queryBuilderParams, setQueryBuilderParams] = useState(null);
+  const [queryBuilderKey, setQueryBuilderKey] = useState(0);
+  const [importError, setImportError] = useState('');
+  const importFileRef = useRef(null);
+  const animatedBridgeRef = useRef(null);
   const [randomizable, setRandomizable] = useState({
     ticks: true,
     amplitude: true,
@@ -255,8 +303,7 @@ function App() {
       if (isBw) {
         nextBg = Math.random() > 0.5 ? '#FFFFFF' : '#161616';
       } else {
-        const presets = ['#FFFFFF', '#F4F4F4', '#CECECE', '#999999', '#464646', '#323232', '#161616'];
-        nextBg = presets[Math.floor(Math.random() * presets.length)];
+        nextBg = randomColorfulBackgroundHex();
       }
     }
 
@@ -342,8 +389,9 @@ function App() {
 
   // Get SVG String helper for individual downloads
   const getSvgStringForConfig = (cfg) => {
-    const width = size.width;
-    const height = size.height;
+    const square = Math.min(size.width, size.height);
+    const width = square;
+    const height = square;
 
     const safe = clampGeometryForViewport(cfg, width, height);
     
@@ -399,10 +447,34 @@ function App() {
     }
   };
 
+  // Download the entire sequence as a single ZIP of SVGs
+  const handleDownloadSequenceZip = async () => {
+    if (sequence.length === 0) return;
+
+    const zip = new JSZip();
+    const folder = zip.folder('disrupt-pendulum-seq') ?? zip;
+
+    for (let i = 0; i < sequence.length; i++) {
+      const cfg = sequence[i];
+      const svgString = getSvgStringForConfig(cfg);
+      folder.file(`disrupt-pendulum-seq-${i + 1}.svg`, svgString);
+    }
+
+    const zipBlob = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(zipBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `disrupt-pendulum-seq-${Date.now()}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   // Export current main canvas SVG
   const handleExportMain = () => {
     if (canvasRef.current) {
-      const svgString = canvasRef.current.getSvgString();
+      const svgString = canvasRef.current.getSvgString({ forceSquare: true });
       const blob = new Blob([svgString], { type: 'image/svg+xml' });
       const url = URL.createObjectURL(blob);
       
@@ -416,34 +488,155 @@ function App() {
     }
   };
 
+  const getStaticSettingsSnapshot = useCallback(() => ({
+    proportions,
+    bwMode,
+    ticks,
+    amplitude,
+    decay,
+    frequencyX,
+    frequencyY,
+    radiusMin,
+    radiusMax,
+    strokeColor,
+    strokeWidth,
+    strokeOpacity,
+    fillColor,
+    fillOpacity,
+    backgroundColor,
+  }), [proportions, bwMode, ticks, amplitude, decay, frequencyX, frequencyY, radiusMin, radiusMax, strokeColor, strokeWidth, strokeOpacity, fillColor, fillOpacity, backgroundColor]);
+
+  const applyStaticSettings = (s) => {
+    if (s.proportions !== undefined) setProportions(s.proportions);
+    if (s.ticks !== undefined) setTicks(s.ticks);
+    if (s.amplitude !== undefined) setAmplitude(s.amplitude);
+    if (s.decay !== undefined) setDecay(s.decay);
+    if (s.frequencyX !== undefined) setFrequencyX(s.frequencyX);
+    if (s.frequencyY !== undefined) setFrequencyY(s.frequencyY);
+    if (s.radiusMin !== undefined) setRadiusMin(s.radiusMin);
+    if (s.radiusMax !== undefined) setRadiusMax(s.radiusMax);
+    if (s.strokeColor !== undefined) setStrokeColor(s.strokeColor);
+    if (s.strokeWidth !== undefined) setStrokeWidth(s.strokeWidth);
+    if (s.strokeOpacity !== undefined) setStrokeOpacity(s.strokeOpacity);
+    if (s.fillColor !== undefined) setFillColor(s.fillColor);
+    if (s.fillOpacity !== undefined) setFillOpacity(s.fillOpacity);
+    if (s.backgroundColor !== undefined) setBackgroundColor(s.backgroundColor);
+    if (s.bwMode !== undefined) setBwMode(s.bwMode);
+  };
+
+  const handleExportPreset = () => {
+    const preset = buildStaticPreset(
+      getStaticSettingsSnapshot(),
+      { enabled: randomizable, sequenceCount },
+      { size: 512, square: true }
+    );
+    downloadPresetJson(preset, `disrupt-pendulum-static-${Date.now()}.json`);
+  };
+
+  const handleImportPreset = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      setImportError('');
+      const preset = await readPresetFile(file);
+      if (preset.mode === 'animated') {
+        setMode('animated');
+        setTimeout(() => animatedBridgeRef.current?.applyPreset(preset), 0);
+      } else {
+        if (mode === 'animated') setMode('static');
+        applyStaticSettings(preset.settings);
+        if (preset.randomizer?.enabled) setRandomizable(preset.randomizer.enabled);
+        if (preset.randomizer?.sequenceCount) setSequenceCount(preset.randomizer.sequenceCount);
+      }
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Import failed');
+    }
+  };
+
+  const getQueryParamsFromCurrent = useCallback(() => {
+    if (mode === 'animated' && animatedBridgeRef.current) {
+      return animatedBridgeRef.current.getApiParams();
+    }
+    return staticSettingsToApiParams(
+      getStaticSettingsSnapshot(),
+      { enabled: randomizable },
+      { size: 512, square: true }
+    );
+  }, [mode, getStaticSettingsSnapshot, randomizable]);
+
+  const openQueryBuilder = () => {
+    setQueryBuilderParams(getQueryParamsFromCurrent());
+    setQueryBuilderKey((k) => k + 1);
+    setIsQueryBuilderOpen(true);
+  };
+
+  const queryBuilderModal = (
+    <QueryBuilderModal
+      key={queryBuilderKey}
+      isOpen={isQueryBuilderOpen}
+      onClose={() => setIsQueryBuilderOpen(false)}
+      initialParams={queryBuilderParams}
+      onLoadFromSettings={getQueryParamsFromCurrent}
+    />
+  );
+
+  const importInput = (
+    <input
+      ref={importFileRef}
+      type="file"
+      accept=".json,application/json"
+      className="hidden"
+      onChange={handleImportPreset}
+    />
+  );
+
   // Render Animated view
   if (mode === 'animated') {
     return (
-      <div className="relative">
-        <div className="absolute top-6 right-8 z-50 flex gap-2">
-          {/* Mode switch */}
-          <button 
-            onClick={() => setMode('static')} 
-            className="brand-btn-secondary py-1.5 px-3 text-[11px] uppercase tracking-wider"
-          >
-            Static View
-          </button>
-          <button 
-            onClick={() => setMode('animated')} 
-            className="brand-btn py-1.5 px-3 text-[11px] uppercase tracking-wider"
-          >
-            Animated Mode
-          </button>
-          {/* Theme select */}
-          <button 
-            onClick={() => setUiTheme(uiTheme === 'light' ? 'dark' : 'light')} 
-            className="brand-btn-secondary py-1.5 px-3 text-[11px] uppercase tracking-wider flex items-center gap-1.5"
-          >
-            {uiTheme === 'light' ? 'Dark theme' : 'Light theme'}
-          </button>
+      <>
+        <div className="relative">
+          <div className="absolute top-6 right-8 z-50 flex gap-2">
+            <button 
+              onClick={() => setMode('static')} 
+              className="brand-btn-secondary py-1.5 px-3 text-[11px] uppercase tracking-wider"
+            >
+              Static View
+            </button>
+            <button 
+              onClick={() => setMode('animated')} 
+              className="brand-btn py-1.5 px-3 text-[11px] uppercase tracking-wider"
+            >
+              Animated Mode
+            </button>
+            <button 
+              onClick={() => setUiTheme(uiTheme === 'light' ? 'dark' : 'light')} 
+              className="brand-btn-secondary py-1.5 px-3 text-[11px] uppercase tracking-wider flex items-center gap-1.5"
+            >
+              {uiTheme === 'light' ? 'Dark theme' : 'Light theme'}
+            </button>
+            <button
+              onClick={openQueryBuilder}
+              className="brand-btn-secondary py-1.5 px-3 text-[11px] uppercase tracking-wider"
+            >
+              API Builder
+            </button>
+          </div>
+          <AnimatedView
+            settingsBridgeRef={animatedBridgeRef}
+            onExportPreset={() => animatedBridgeRef.current?.exportPreset()}
+            onImportPreset={() => importFileRef.current?.click()}
+            onOpenQueryBuilder={openQueryBuilder}
+          />
+          {importError && (
+            <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-red-600 text-white text-xs px-4 py-2 rounded shadow-lg">
+              {importError}
+            </div>
+          )}
         </div>
-        <AnimatedView size={size} />
-      </div>
+        {queryBuilderModal}
+        {importInput}
+      </>
     );
   }
 
@@ -451,6 +644,7 @@ function App() {
   const bgPresets = ['#FFFFFF', '#F4F4F4', '#CECECE', '#999999', '#464646', '#323232', '#161616'];
 
   return (
+    <>
     <div className="flex h-screen w-screen overflow-hidden font-sans select-none brand-grid-bg text-black dark:text-white bg-white dark:bg-zinc-950 transition-colors">
       
       {/* Sidebar Controls */}
@@ -463,7 +657,7 @@ function App() {
           </h1>
           <div className="text-[10px] uppercase font-semibold text-gray-400 tracking-widest font-sans flex items-center justify-between">
             <span>XY Pendulum Viz</span>
-            <span className="text-black dark:text-white bg-gray-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded text-[8px] font-mono">v0.2.0</span>
+            <span className="text-black dark:text-white bg-gray-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded text-[8px] font-mono">v{pkg.version}</span>
           </div>
         </div>
 
@@ -612,32 +806,57 @@ function App() {
         </div>
 
         {/* Footer Actions */}
-        <div className="mt-8 pt-4 border-t border-gray-100 dark:border-zinc-900 flex gap-2">
-          <button 
-            onClick={handleExportMain}
-            className="flex-1 brand-btn font-bold py-2.5 px-4 text-xs"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-            Export SVG
-          </button>
-          
+        <div className="mt-8 pt-4 border-t border-gray-100 dark:border-zinc-900 space-y-2">
+          <div className="flex gap-2">
+            <button 
+              onClick={handleExportMain}
+              className="flex-1 brand-btn font-bold py-2.5 px-4 text-xs"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Export SVG
+            </button>
+            
+            <button
+              onClick={() => setUiTheme(uiTheme === 'light' ? 'dark' : 'light')}
+              className="brand-btn-secondary p-2.5 aspect-square"
+              title="Toggle app interface dark/light theme"
+            >
+              {uiTheme === 'light' ? (
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m0 13.5V21M6.75 12H3m18 0h-3.75M19.5 19.5l-1.5-1.5M6 6l1.5 1.5M19.5 6l-1.5 1.5M6 19.5L7.5 18m3-6a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              )}
+            </button>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={handleExportPreset}
+              className="flex-1 brand-btn-secondary py-2 text-[10px] uppercase tracking-wider font-semibold"
+            >
+              Export preset
+            </button>
+            <button
+              onClick={() => importFileRef.current?.click()}
+              className="flex-1 brand-btn-secondary py-2 text-[10px] uppercase tracking-wider font-semibold"
+            >
+              Import preset
+            </button>
+          </div>
           <button
-            onClick={() => setUiTheme(uiTheme === 'light' ? 'dark' : 'light')}
-            className="brand-btn-secondary p-2.5 aspect-square"
-            title="Toggle app interface dark/light theme"
+            onClick={openQueryBuilder}
+            className="w-full brand-btn-secondary py-2 text-[10px] uppercase tracking-wider font-semibold"
           >
-            {uiTheme === 'light' ? (
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" />
-              </svg>
-            ) : (
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m0 13.5V21M6.75 12H3m18 0h-3.75M19.5 19.5l-1.5-1.5M6 6l1.5 1.5M19.5 6l-1.5 1.5M6 19.5L7.5 18m3-6a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            )}
+            API query builder
           </button>
+          {importError && (
+            <p className="text-[10px] text-red-500 font-sans">{importError}</p>
+          )}
         </div>
       </div>
 
@@ -674,7 +893,7 @@ function App() {
 
         {/* Sequencer gallery scroll at bottom of main viewport */}
         {sequence.length > 0 && (
-          <div className="h-44 bg-white dark:bg-[#161616] border-t border-gray-100 dark:border-zinc-900 p-4 flex flex-col gap-2 relative z-10 animate-fade-in">
+          <div className="h-44 min-w-0 bg-white dark:bg-[#161616] border-t border-gray-100 dark:border-zinc-900 p-4 flex flex-col gap-2 relative z-10 animate-fade-in">
             <div className="flex justify-between items-center px-1">
               <h4 className="text-xs font-semibold uppercase tracking-widest text-gray-400 font-sans">
                 Generated Sequence Gallery ({sequence.length})
@@ -687,6 +906,12 @@ function App() {
                   Download All (Queue)
                 </button>
                 <button
+                  onClick={handleDownloadSequenceZip}
+                  className="brand-btn py-1 px-3 text-[9px] uppercase tracking-wider font-semibold"
+                >
+                  Download ZIP
+                </button>
+                <button
                   onClick={() => setSequence([])}
                   className="brand-btn-secondary py-1 px-3 text-[9px] uppercase tracking-wider font-semibold"
                 >
@@ -694,7 +919,7 @@ function App() {
                 </button>
               </div>
             </div>
-            <div className="flex gap-3 overflow-x-auto py-1 px-0.5 flex-1 scrollbar-thin scrollbar-thumb-gray-200">
+            <div className="flex w-full min-w-0 max-w-full flex-wrap content-start items-start gap-3 overflow-x-hidden overflow-y-auto py-1 px-0.5 flex-1 scrollbar-thin scrollbar-thumb-gray-200">
               {sequence.map((cfg, idx) => (
                 <PendulumThumbnail 
                   key={idx} 
@@ -832,6 +1057,9 @@ function App() {
       )}
 
     </div>
+    {queryBuilderModal}
+    {importInput}
+    </>
   );
 }
 

@@ -1,6 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import PendulumCanvas from './PendulumCanvas';
 import { Slider, RangeControls, ColorPicker, Toggle, Select } from './Controls';
+import { buildAnimatedPreset, downloadPresetJson } from '../lib/presetFormat';
+import { animatedSettingsToApiParams } from '../lib/apiQuery';
 
 // Easing function: Ease-in-out Sine
 function easeInOutSine(x) {
@@ -17,7 +19,7 @@ const isBgDark = (hex) => {
   return hex === '#161616' || hex === '#323232' || hex === '#464646';
 };
 
-const AnimatedView = () => {
+const AnimatedView = ({ settingsBridgeRef, onExportPreset, onImportPreset, onOpenQueryBuilder }) => {
   // ---- ASPECT RATIO & INTERFACE STATES ----
   const [proportions, setProportions] = useState('responsive'); // responsive, square, landscape, portrait
   const [size, setSize] = useState({ width: 700, height: 700 });
@@ -167,7 +169,7 @@ const AnimatedView = () => {
   // Export current animated frame SVG
   const handleExportFrame = () => {
     if (canvasRef.current) {
-      const svgString = canvasRef.current.getSvgString();
+      const svgString = canvasRef.current.getSvgString({ forceSquare: true });
       const blob = new Blob([svgString], { type: 'image/svg+xml' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -179,6 +181,78 @@ const AnimatedView = () => {
       URL.revokeObjectURL(url);
     }
   };
+
+  const getSettingsSnapshot = useCallback(() => ({
+    proportions,
+    bwMode,
+    duration,
+    ticks,
+    amplitude,
+    decayMin,
+    decayMax,
+    freqXMin,
+    freqXMax,
+    freqYMin,
+    freqYMax,
+    minRadiusMin,
+    minRadiusMax,
+    maxRadiusMin,
+    maxRadiusMax,
+    strokeColor,
+    strokeWidth,
+    strokeOpacity,
+    fillColor,
+    fillOpacity,
+    backgroundColor,
+  }), [proportions, bwMode, duration, ticks, amplitude, decayMin, decayMax, freqXMin, freqXMax, freqYMin, freqYMax, minRadiusMin, minRadiusMax, maxRadiusMin, maxRadiusMax, strokeColor, strokeWidth, strokeOpacity, fillColor, fillOpacity, backgroundColor]);
+
+  const applySettings = useCallback((s) => {
+    if (s.proportions !== undefined) setProportions(s.proportions);
+    if (s.duration !== undefined) setDuration(s.duration);
+    if (s.ticks !== undefined) setTicks(s.ticks);
+    if (s.amplitude !== undefined) setAmplitude(s.amplitude);
+    if (s.decayMin !== undefined) setDecayMin(s.decayMin);
+    if (s.decayMax !== undefined) setDecayMax(s.decayMax);
+    if (s.freqXMin !== undefined) setFreqXMin(s.freqXMin);
+    if (s.freqXMax !== undefined) setFreqXMax(s.freqXMax);
+    if (s.freqYMin !== undefined) setFreqYMin(s.freqYMin);
+    if (s.freqYMax !== undefined) setFreqYMax(s.freqYMax);
+    if (s.minRadiusMin !== undefined) setMinRadiusMin(s.minRadiusMin);
+    if (s.minRadiusMax !== undefined) setMinRadiusMax(s.minRadiusMax);
+    if (s.maxRadiusMin !== undefined) setMaxRadiusMin(s.maxRadiusMin);
+    if (s.maxRadiusMax !== undefined) setMaxRadiusMax(s.maxRadiusMax);
+    if (s.strokeColor !== undefined) setStrokeColor(s.strokeColor);
+    if (s.strokeWidth !== undefined) setStrokeWidth(s.strokeWidth);
+    if (s.strokeOpacity !== undefined) setStrokeOpacity(s.strokeOpacity);
+    if (s.fillColor !== undefined) setFillColor(s.fillColor);
+    if (s.fillOpacity !== undefined) setFillOpacity(s.fillOpacity);
+    if (s.backgroundColor !== undefined) setBackgroundColor(s.backgroundColor);
+    if (s.bwMode !== undefined) setBwMode(s.bwMode);
+  }, []);
+
+  const exportPreset = useCallback(() => {
+    const preset = buildAnimatedPreset(getSettingsSnapshot(), { size: 512, square: true });
+    downloadPresetJson(preset, `disrupt-pendulum-animated-${Date.now()}.json`);
+  }, [getSettingsSnapshot]);
+
+  const applyPreset = useCallback((preset) => {
+    if (preset.settings) applySettings(preset.settings);
+  }, [applySettings]);
+
+  const getApiParams = useCallback(() => {
+    return animatedSettingsToApiParams(getSettingsSnapshot(), { size: 512, square: true });
+  }, [getSettingsSnapshot]);
+
+  useEffect(() => {
+    if (settingsBridgeRef) {
+      settingsBridgeRef.current = {
+        getSettingsSnapshot,
+        applyPreset,
+        exportPreset,
+        getApiParams,
+      };
+    }
+  }, [settingsBridgeRef, getSettingsSnapshot, applyPreset, exportPreset, getApiParams]);
 
   const bgPresets = ['#FFFFFF', '#F4F4F4', '#CECECE', '#999999', '#464646', '#323232', '#161616'];
 
@@ -319,7 +393,7 @@ const AnimatedView = () => {
         </div>
 
         {/* Footer Actions */}
-        <div className="mt-8 pt-4 border-t border-gray-100 dark:border-zinc-900">
+        <div className="mt-8 pt-4 border-t border-gray-100 dark:border-zinc-900 space-y-2">
           <button 
             onClick={handleExportFrame}
             className="w-full brand-btn font-bold py-2.5 px-4 text-xs"
@@ -329,6 +403,28 @@ const AnimatedView = () => {
             </svg>
             Export Frame SVG
           </button>
+          <div className="flex gap-2">
+            <button
+              onClick={onExportPreset ?? exportPreset}
+              className="flex-1 brand-btn-secondary py-2 text-[10px] uppercase tracking-wider font-semibold"
+            >
+              Export preset
+            </button>
+            <button
+              onClick={onImportPreset}
+              className="flex-1 brand-btn-secondary py-2 text-[10px] uppercase tracking-wider font-semibold"
+            >
+              Import preset
+            </button>
+          </div>
+          {onOpenQueryBuilder && (
+            <button
+              onClick={onOpenQueryBuilder}
+              className="w-full brand-btn-secondary py-2 text-[10px] uppercase tracking-wider font-semibold"
+            >
+              API query builder
+            </button>
+          )}
         </div>
       </div>
 
