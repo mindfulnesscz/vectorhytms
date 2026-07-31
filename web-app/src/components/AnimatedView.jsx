@@ -3,6 +3,7 @@ import PendulumCanvas from './PendulumCanvas';
 import { Slider, RangeControls, ColorPicker, Toggle, Select } from './Controls';
 import { buildAnimatedPreset, downloadPresetJson } from '../lib/presetFormat';
 import { animatedSettingsToApiParams } from '../lib/apiQuery';
+import { downloadSvgAsPng, downloadSvgString } from '../lib/exportImage';
 
 // Easing function: Ease-in-out Sine
 function easeInOutSine(x) {
@@ -166,19 +167,15 @@ const AnimatedView = ({ settingsBridgeRef, onExportPreset, onImportPreset, onOpe
 
   const canvasRef = useRef(null);
   
-  // Export current animated frame SVG
-  const handleExportFrame = () => {
-    if (canvasRef.current) {
-      const svgString = canvasRef.current.getSvgString({ forceSquare: true });
-      const blob = new Blob([svgString], { type: 'image/svg+xml' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `disrupt-pendulum-frame-${Date.now()}.svg`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+  // Export current animated frame as SVG or PNG
+  const handleExportFrame = async (format = 'svg') => {
+    if (!canvasRef.current) return;
+    const svgString = canvasRef.current.getSvgString({ forceSquare: true });
+    const stamp = Date.now();
+    if (format === 'png') {
+      await downloadSvgAsPng(svgString, `disrupt-pendulum-frame-${stamp}.png`);
+    } else {
+      downloadSvgString(svgString, `disrupt-pendulum-frame-${stamp}.svg`);
     }
   };
 
@@ -394,15 +391,26 @@ const AnimatedView = ({ settingsBridgeRef, onExportPreset, onImportPreset, onOpe
 
         {/* Footer Actions */}
         <div className="mt-8 pt-4 border-t border-gray-100 dark:border-zinc-900 space-y-2">
-          <button 
-            onClick={handleExportFrame}
-            className="w-full brand-btn font-bold py-2.5 px-4 text-xs"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-            Export Frame SVG
-          </button>
+          <div className="flex gap-2">
+            <button 
+              onClick={() => handleExportFrame('svg')}
+              className="flex-1 brand-btn font-bold py-2.5 px-4 text-xs"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Export Frame SVG
+            </button>
+            <button 
+              onClick={() => handleExportFrame('png')}
+              className="flex-1 brand-btn font-bold py-2.5 px-4 text-xs"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Export Frame PNG
+            </button>
+          </div>
           <div className="flex gap-2">
             <button
               onClick={onExportPreset ?? exportPreset}

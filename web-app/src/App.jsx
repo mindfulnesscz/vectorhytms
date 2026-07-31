@@ -7,6 +7,7 @@ import JSZip from 'jszip';
 import pkg from '../package.json';
 import { buildStaticPreset, downloadPresetJson, readPresetFile } from './lib/presetFormat';
 import { staticSettingsToApiParams } from './lib/apiQuery';
+import { downloadBlob, downloadSvgAsPng, downloadSvgString, svgStringToPngBlob } from './lib/exportImage';
 import './index.css';
 
 // Hex to RGBA helper for canvas thumbnails
@@ -428,63 +429,55 @@ function App() {
   };
 
   // Download sequence sequentially with a timeout to prevent pop-up blocker issues
-  const handleDownloadSequence = async () => {
+  const handleDownloadSequence = async (format = 'svg') => {
     for (let i = 0; i < sequence.length; i++) {
       const cfg = sequence[i];
       const svgString = getSvgStringForConfig(cfg);
-      const blob = new Blob([svgString], { type: 'image/svg+xml' });
-      const url = URL.createObjectURL(blob);
-      
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `disrupt-pendulum-seq-${i + 1}.svg`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      
+      const base = `disrupt-pendulum-seq-${i + 1}`;
+
+      if (format === 'png') {
+        await downloadSvgAsPng(svgString, `${base}.png`);
+      } else {
+        downloadSvgString(svgString, `${base}.svg`);
+      }
+
       await new Promise(resolve => setTimeout(resolve, 250));
     }
   };
 
-  // Download the entire sequence as a single ZIP of SVGs
-  const handleDownloadSequenceZip = async () => {
+  // Download the entire sequence as a single ZIP of SVGs or PNGs
+  const handleDownloadSequenceZip = async (format = 'svg') => {
     if (sequence.length === 0) return;
 
     const zip = new JSZip();
     const folder = zip.folder('disrupt-pendulum-seq') ?? zip;
+    const ext = format === 'png' ? 'png' : 'svg';
 
     for (let i = 0; i < sequence.length; i++) {
       const cfg = sequence[i];
       const svgString = getSvgStringForConfig(cfg);
-      folder.file(`disrupt-pendulum-seq-${i + 1}.svg`, svgString);
+      const name = `disrupt-pendulum-seq-${i + 1}.${ext}`;
+
+      if (format === 'png') {
+        const pngBlob = await svgStringToPngBlob(svgString);
+        folder.file(name, pngBlob);
+      } else {
+        folder.file(name, svgString);
+      }
     }
 
     const zipBlob = await zip.generateAsync({ type: 'blob' });
-    const url = URL.createObjectURL(zipBlob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `disrupt-pendulum-seq-${Date.now()}.zip`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadBlob(zipBlob, `disrupt-pendulum-seq-${Date.now()}.zip`);
   };
 
-  // Export current main canvas SVG
-  const handleExportMain = () => {
-    if (canvasRef.current) {
-      const svgString = canvasRef.current.getSvgString({ forceSquare: true });
-      const blob = new Blob([svgString], { type: 'image/svg+xml' });
-      const url = URL.createObjectURL(blob);
-      
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'disrupt-pendulum.svg';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+  // Export current main canvas as SVG or PNG
+  const handleExportMain = async (format = 'svg') => {
+    if (!canvasRef.current) return;
+    const svgString = canvasRef.current.getSvgString({ forceSquare: true });
+    if (format === 'png') {
+      await downloadSvgAsPng(svgString, 'disrupt-pendulum.png');
+    } else {
+      downloadSvgString(svgString, 'disrupt-pendulum.svg');
     }
   };
 
@@ -809,13 +802,22 @@ function App() {
         <div className="mt-8 pt-4 border-t border-gray-100 dark:border-zinc-900 space-y-2">
           <div className="flex gap-2">
             <button 
-              onClick={handleExportMain}
+              onClick={() => handleExportMain('svg')}
               className="flex-1 brand-btn font-bold py-2.5 px-4 text-xs"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
               Export SVG
+            </button>
+            <button 
+              onClick={() => handleExportMain('png')}
+              className="flex-1 brand-btn font-bold py-2.5 px-4 text-xs"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Export PNG
             </button>
             
             <button
@@ -898,18 +900,30 @@ function App() {
               <h4 className="text-xs font-semibold uppercase tracking-widest text-gray-400 font-sans">
                 Generated Sequence Gallery ({sequence.length})
               </h4>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2 justify-end">
                 <button
-                  onClick={handleDownloadSequence}
+                  onClick={() => handleDownloadSequence('svg')}
                   className="brand-btn py-1 px-3 text-[9px] uppercase tracking-wider font-semibold"
                 >
-                  Download All (Queue)
+                  Queue SVG
                 </button>
                 <button
-                  onClick={handleDownloadSequenceZip}
+                  onClick={() => handleDownloadSequence('png')}
                   className="brand-btn py-1 px-3 text-[9px] uppercase tracking-wider font-semibold"
                 >
-                  Download ZIP
+                  Queue PNG
+                </button>
+                <button
+                  onClick={() => handleDownloadSequenceZip('svg')}
+                  className="brand-btn py-1 px-3 text-[9px] uppercase tracking-wider font-semibold"
+                >
+                  ZIP SVG
+                </button>
+                <button
+                  onClick={() => handleDownloadSequenceZip('png')}
+                  className="brand-btn py-1 px-3 text-[9px] uppercase tracking-wider font-semibold"
+                >
+                  ZIP PNG
                 </button>
                 <button
                   onClick={() => setSequence([])}
